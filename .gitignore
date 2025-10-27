@@ -19,3 +19,6 @@ read_verbose
 
 # demo files
 fizzbuzz.js
+
+# macOS
+.DS_Store
