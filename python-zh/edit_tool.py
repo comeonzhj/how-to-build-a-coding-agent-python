@@ -1,30 +1,68 @@
 #!/usr/bin/env python3
 """
-命令执行助手 - 添加 shell 命令执行功能
-这是构建编程助手的第四个版本
+文件编辑助手 - 添加文件编辑功能
+这是构建编程助手的第五个版本
+
+这个程序在前一版本的基础上添加了文件编辑功能。
+现在 Claude 不仅可以读取文件、浏览目录、执行命令，
+还可以直接修改文件内容，具备了完整的文件操作能力。
+
+新增功能：
+- 编辑现有文件（覆盖写入）
+- 创建新文件（如果不存在）
+- 字符串替换（查找和替换）
+- 自动创建目录（如果需要）
+- 文件统计信息（大小、创建状态等）
+
+为什么要添加文件编辑功能？
+- 修改代码文件
+- 添加注释或文档
+- 创建新文件
+- 批量替换文本
+- 重构代码
+- 修复错误
+
+编辑工具的特点：
+- 支持创建不存在的文件
+- 自动创建必要的目录
+- 提供替换确认信息
+- 处理编码问题
+- 详细的错误信息
+
+使用场景示例：
+- "创建一个 Python 脚本"
+- "在文件开头添加注释"
+- "替换所有的旧函数名"
+- "修复这个 bug"
+- "添加新的配置选项"
 """
 
-import argparse
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from anthropic import Anthropic
-from dotenv import load_dotenv
+# 导入必要的库
+import argparse  # 命令行参数解析
+import json      # JSON 数据处理
+import os        # 操作系统功能
+import subprocess  # 子进程管理（复用前一版本的 bash 功能）
+import sys       # 系统相关操作
+from pathlib import Path  # 现代文件路径处理
+from typing import List, Dict, Any, Optional  # 类型提示
+from anthropic import Anthropic  # Anthropic API 客户端
+from dotenv import load_dotenv   # 环境变量加载
 
 # 加载环境变量
 load_dotenv()
 
 class ToolRegistry:
-    """工具注册表"""
+    """工具注册表类
+    
+    管理所有可用工具，包括文件操作、命令执行和编辑工具。
+    """
     
     def __init__(self):
+        """初始化工具注册表"""
         self.tools = {}
     
     def register(self, name: str, description: str, input_schema: Dict, function):
-        """注册工具"""
+        """注册新工具"""
         self.tools[name] = {
             "name": name,
             "description": description,
@@ -49,7 +87,7 @@ class ToolRegistry:
 
 
 def read_file(path: str) -> Dict[str, Any]:
-    """读取文件内容"""
+    """读取文件内容（与前一版本相同）"""
     try:
         file_path = Path(path)
         
@@ -97,7 +135,7 @@ def read_file(path: str) -> Dict[str, Any]:
 
 
 def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
-    """列出文件和目录"""
+    """列出文件和目录（与前一版本相同）"""
     try:
         target_path = Path(path)
         
@@ -151,11 +189,12 @@ def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
 
 
 def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
-    """执行 shell 命令"""
+    """执行 shell 命令（与前一版本相同，但简化了一些）"""
     try:
-        # 安全检查 - 禁止某些危险命令
+        # 安全检查 - 阻止危险命令
         dangerous_commands = [
-            "rm -rf /", "sudo", "mkfs", "fdisk", "dd if=", ":(){ :|:& };:", "wget", "curl"
+            "rm -rf /", "sudo", "mkfs", "fdisk", "dd if=", 
+            ":(){ :|:& };:", "wget", "curl"
         ]
         
         for dangerous in dangerous_commands:
@@ -169,9 +208,6 @@ def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
                 }
         
         # 执行命令
-        if self.verbose:
-            print(f"[日志] 执行命令: {command}")
-        
         result = subprocess.run(
             command,
             shell=True,
@@ -189,25 +225,6 @@ def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
             "exit_code": result.returncode,
             "command": command
         }
-        
-        # 如果命令成功，添加一些有用的信息
-        if result.returncode == 0:
-            # 对于某些命令，添加额外的上下文
-            if command.startswith("ls"):
-                lines = result.stdout.strip().split('\n')
-                response["file_count"] = len([line for line in lines if line.strip()])
-            elif command.startswith("pwd"):
-                response["current_directory"] = result.stdout.strip()
-            elif command.startswith("git") and "branch" in command:
-                # 解析 git 分支信息
-                lines = result.stdout.strip().split('\n')
-                current_branch = None
-                for line in lines:
-                    if line.startswith('*'):
-                        current_branch = line[1:].strip()
-                        break
-                if current_branch:
-                    response["current_branch"] = current_branch
         
         return response
         
@@ -229,24 +246,238 @@ def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
         }
 
 
-class BashAgent:
-    """命令执行助手"""
+def edit_file(path: str, content: str, create_if_not_exists: bool = True) -> Dict[str, Any]:
+    """编辑或创建文件的工具函数
+    
+    这是新增的核心工具，允许 Claude 创建新文件或修改现有文件。
+    
+    参数:
+        path: 要编辑的文件路径
+        content: 新的文件内容
+        create_if_not_exists: 如果文件不存在是否创建，默认为 True
+        
+    返回:
+        字典，包含以下字段：
+        - success: 是否成功
+        - path: 文件的绝对路径
+        - size: 文件大小（字节）
+        - created: 是否创建了新文件
+        - message: 成功消息
+        - error: 错误信息（如果失败）
+    
+    功能特点：
+    - 支持创建新文件
+    - 自动创建必要的目录
+    - 使用 UTF-8 编码写入
+    - 提供详细的操作结果
+    - 错误处理和恢复
+    
+    使用注意：
+    - 会完全覆盖现有文件内容
+    - 如果路径包含不存在的目录，会自动创建
+    - 默认编码为 UTF-8
+    """
+    try:
+        file_path = Path(path)
+        
+        # 检查文件是否存在
+        if not file_path.exists():
+            if not create_if_not_exists:
+                # 不允许创建新文件
+                return {
+                    "success": False,
+                    "error": f"文件不存在且不允许创建: {path}"
+                }
+            
+            # 创建文件（包括必要的目录）
+            # mkdir(parents=True, exist_ok=True) 会创建所有不存在的父目录
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            if self.verbose:
+                print(f"[日志] 创建新文件: {path}")
+        
+        # 检查路径是否是文件（而不是目录）
+        if file_path.exists() and not file_path.is_file():
+            return {
+                "success": False,
+                "error": f"路径不是文件: {path}"
+            }
+        
+        # 写入文件内容
+        try:
+            # 使用 UTF-8 编码写入
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # 获取文件统计信息
+            file_stats = file_path.stat()
+            
+            # 判断是否创建了新文件
+            created = not file_path.exists() if create_if_not_exists else False
+            
+            return {
+                "success": True,
+                "path": str(file_path.absolute()),  # 绝对路径
+                "size": file_stats.st_size,         # 文件大小
+                "created": created,                 # 是否新创建
+                "message": "文件已成功保存"
+            }
+            
+        except Exception as e:
+            # 写入失败
+            return {
+                "success": False,
+                "error": f"写入文件时出错: {str(e)}"
+            }
+            
+    except Exception as e:
+        # 其他错误
+        return {
+            "success": False,
+            "error": f"编辑文件时出错: {str(e)}"
+        }
+
+
+def str_replace_file(path: str, old: str, new: str, replace_all: bool = False) -> Dict[str, Any]:
+    """在文件中替换字符串的工具函数
+    
+    这是另一个新增的编辑工具，用于在现有文件中进行文本替换。
+    比 edit_file 更精细，可以只修改文件的特定部分。
+    
+    参数:
+        path: 要编辑的文件路径
+        old: 要替换的字符串
+        new: 新字符串
+        replace_all: 是否替换所有匹配项，默认为 False（只替换第一个）
+        
+    返回:
+        字典，包含以下字段：
+        - success: 是否成功
+        - path: 文件的绝对路径
+        - replacements: 替换次数
+        - old_length: 被替换字符串的长度
+        - new_length: 新字符串的长度
+        - message: 结果消息
+        - error: 错误信息（如果失败）
+    
+    功能特点：
+    - 支持单次或全部替换
+    - 处理编码问题（自动回退）
+    - 提供详细的替换统计
+    - 如果找不到匹配项会报告错误
+    
+    使用场景：
+    - 重命名变量或函数
+    - 更新配置值
+    - 修复拼写错误
+    - 批量修改代码
+    """
+    try:
+        file_path = Path(path)
+        
+        # 检查文件是否存在
+        if not file_path.exists():
+            return {
+                "success": False,
+                "error": f"文件不存在: {path}"
+            }
+        
+        # 检查路径是否是文件（而不是目录）
+        if not file_path.is_file():
+            return {
+                "success": False,
+                "error": f"路径不是文件: {path}"
+            }
+        
+        # 读取文件内容
+        try:
+            # 首先尝试 UTF-8 编码
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # 如果 UTF-8 失败，尝试 latin-1
+            with open(file_path, 'r', encoding='latin-1') as f:
+                content = f.read()
+        
+        # 执行替换操作
+        if replace_all:
+            # 替换所有匹配项
+            new_content = content.replace(old, new)
+            # 计算替换次数
+            replacements = content.count(old)
+        else:
+            # 只替换第一个匹配项
+            new_content = content.replace(old, new, 1)
+            # 检查是否进行了替换
+            replacements = 1 if old in content else 0
+        
+        # 如果没有找到匹配项
+        if replacements == 0:
+            return {
+                "success": False,
+                "error": f"未找到要替换的字符串: '{old}'",
+                "replacements": 0
+            }
+        
+        # 将修改后的内容写回文件
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            # 返回详细的替换结果
+            return {
+                "success": True,
+                "path": str(file_path.absolute()),
+                "replacements": replacements,
+                "old_length": len(old),
+                "new_length": len(new),
+                "message": f"成功替换 {replacements} 处"
+            }
+            
+        except Exception as e:
+            # 写入失败
+            return {
+                "success": False,
+                "error": f"写入文件时出错: {str(e)}"
+            }
+            
+    except Exception as e:
+        # 其他错误
+        return {
+            "success": False,
+            "error": f"替换字符串时出错: {str(e)}"
+        }
+
+
+class EditToolAgent:
+    """文件编辑助手类
+    
+    现在支持五种主要工具：
+    1. read_file - 读取文件内容
+    2. list_files - 列出目录内容  
+    3. bash - 执行 shell 命令
+    4. edit_file - 编辑或创建文件（新增）
+    5. str_replace_file - 字符串替换（新增）
+    
+    这个助手具备了完整的文件操作能力：读取、写入、修改。
+    """
     
     def __init__(self, verbose: bool = False):
-        """初始化助手"""
+        """初始化文件编辑助手"""
         self.verbose = verbose
         self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.conversation = []
         self.registry = ToolRegistry()
         
-        # 注册工具
+        # 注册所有工具
         self._register_tools()
         
         if self.verbose:
-            print("[日志] 命令执行助手已初始化")
+            print("[日志] 文件编辑助手已初始化")
     
     def _register_tools(self):
-        """注册所有工具"""
+        """注册所有可用工具"""
+        
         # 注册 read_file 工具
         self.registry.register(
             name="read_file",
@@ -308,6 +539,62 @@ class BashAgent:
             function=bash
         )
         
+        # 注册 edit_file 工具（新增）
+        self.registry.register(
+            name="edit_file",
+            description="编辑或创建文件",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "要编辑的文件路径"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "新的文件内容"
+                    },
+                    "create_if_not_exists": {
+                        "type": "boolean",
+                        "description": "如果文件不存在是否创建",
+                        "default": True
+                    }
+                },
+                "required": ["path", "content"]  # path 和 content 是必需的
+            },
+            function=edit_file
+        )
+        
+        # 注册 str_replace_file 工具（新增）
+        self.registry.register(
+            name="str_replace_file",
+            description="在文件中替换字符串",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "要编辑的文件路径"
+                    },
+                    "old": {
+                        "type": "string",
+                        "description": "要替换的字符串"
+                    },
+                    "new": {
+                        "type": "string",
+                        "description": "新字符串"
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "是否替换所有匹配项",
+                        "default": False
+                    }
+                },
+                "required": ["path", "old", "new"]  # 三个参数都是必需的
+            },
+            function=str_replace_file
+        )
+        
         if self.verbose:
             print(f"[日志] 已注册 {len(self.registry.tools)} 个工具")
     
@@ -319,7 +606,7 @@ class BashAgent:
             return ""
     
     def execute_tool(self, tool_name: str, tool_input: Dict) -> Dict[str, Any]:
-        """执行工具"""
+        """执行指定的工具"""
         tool = self.registry.get(tool_name)
         if not tool:
             return {
@@ -369,7 +656,10 @@ class BashAgent:
             raise e
     
     def handle_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
-        """处理工具调用"""
+        """处理工具调用
+        
+        现在需要处理五种不同类型的工具，包括两个新的编辑工具。
+        """
         results = []
         
         for tool_call in tool_calls:
@@ -389,48 +679,62 @@ class BashAgent:
             
             results.append(tool_result)
             
-            # 显示结果摘要
+            # 显示结果摘要（根据工具类型显示不同信息）
             if result.get("success"):
-                if tool_name == "bash":
-                    stdout = result.get("stdout", "").strip()
-                    stderr = result.get("stderr", "").strip()
-                    exit_code = result.get("exit_code", 0)
+                if tool_name == "edit_file":
+                    # 显示文件编辑结果
+                    path = result.get("path", "")
+                    size = result.get("size", 0)
+                    created = result.get("created", False)
+                    message = result.get("message", "")
                     
+                    print(f"✅ 文件编辑成功")
+                    print(f"📁 文件路径: {path}")
+                    print(f"📊 文件大小: {size} 字节")
+                    if created:
+                        print("🆕 创建了新文件")
+                    print(f"💬 {message}")
+                    
+                elif tool_name == "str_replace_file":
+                    # 显示字符串替换结果
+                    path = result.get("path", "")
+                    replacements = result.get("replacements", 0)
+                    message = result.get("message", "")
+                    
+                    print(f"✅ 字符串替换成功")
+                    print(f"📁 文件路径: {path}")
+                    print(f"🔢 替换次数: {replacements}")
+                    print(f"💬 {message}")
+                    
+                elif tool_name == "bash":
+                    # 显示命令执行结果
+                    exit_code = result.get("exit_code", 0)
                     print(f"✅ 命令执行完成，退出码: {exit_code}")
                     
-                    if stdout:
-                        stdout_lines = stdout.split('\n')
-                        if len(stdout_lines) <= 10:
-                            print("输出:")
-                            for line in stdout_lines:
-                                print(f"  {line}")
-                        else:
-                            print("输出 (前10行):")
-                            for line in stdout_lines[:10]:
-                                print(f"  {line}")
-                            print(f"  ... 还有 {len(stdout_lines) - 10} 行")
-                    
-                    if stderr:
-                        print(f"错误输出: {stderr[:200]}")
-                        
                 elif tool_name == "list_files":
+                    # 显示文件列表结果
                     items = result.get("items", [])
                     print(f"✅ 找到 {len(items)} 个项目")
                     
                 elif tool_name == "read_file":
+                    # 显示文件读取结果
                     content = result.get("content", "")
                     print(f"✅ 读取文件成功，内容长度: {len(content)} 字符")
                     
             else:
+                # 工具执行失败
                 print(f"❌ 工具执行失败: {result.get('error', '未知错误')}")
         
         return results
     
     def run(self):
-        """运行聊天循环"""
-        print("🤖 命令执行助手 (使用 Ctrl+C 退出)")
-        print("💡 提示：你可以说'运行命令 xxx'或'执行 ls'等来执行 shell 命令")
-        print("⚠️  注意：出于安全考虑，某些危险命令被禁止执行")
+        """运行聊天循环
+        
+        主要的聊天循环，现在支持文件编辑功能。
+        """
+        # 显示欢迎信息和使用提示
+        print("🤖 文件编辑助手 (使用 Ctrl+C 退出)")
+        print("💡 提示：你可以说'创建文件 xxx'、'编辑文件 xxx'或'替换文件中的 xxx'")
         print("-" * 50)
         
         if self.verbose:
@@ -441,7 +745,7 @@ class BashAgent:
                 # 获取用户输入
                 user_input = self.get_user_input()
                 
-                # 处理空输入或退出
+                # 处理退出条件
                 if not user_input or user_input.lower() in ['exit', 'quit', '退出']:
                     if self.verbose:
                         print("[日志] 用户请求退出")
@@ -470,9 +774,9 @@ class BashAgent:
                         elif content.type == "tool_use":
                             tool_calls.append(content)
                     
-                    # 如果有工具调用，执行它们
+                    # 处理工具调用（如果有）
                     if tool_calls:
-                        # 先显示文本消息（如果有）
+                        # 首先显示文本消息（如果有的话）
                         if assistant_message:
                             print(f"🤖 Claude: {assistant_message}")
                             print()
@@ -480,12 +784,13 @@ class BashAgent:
                         # 执行工具调用
                         tool_results = self.handle_tool_calls(tool_calls)
                         
-                        # 将工具结果发送回 Claude
+                        # 将 Claude 的响应添加到对话历史
                         self.conversation.append({
                             "role": "assistant",
                             "content": response.content
                         })
                         
+                        # 将工具结果发送回 Claude
                         self.conversation.append({
                             "role": "user",
                             "content": [
@@ -500,7 +805,7 @@ class BashAgent:
                         # 获取最终响应
                         final_response = self.run_inference(self.conversation)
                         
-                        # 显示最终响应
+                        # 提取并显示最终消息
                         final_message = ""
                         for content in final_response.content:
                             if content.type == "text":
@@ -542,7 +847,7 @@ class BashAgent:
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="命令执行助手")
+    parser = argparse.ArgumentParser(description="文件编辑助手")
     parser.add_argument("--verbose", "-v", action="store_true", 
                        help="启用详细日志记录")
     
@@ -555,7 +860,7 @@ def main():
         sys.exit(1)
     
     # 创建并运行助手
-    agent = BashAgent(verbose=args.verbose)
+    agent = EditToolAgent(verbose=args.verbose)
     agent.run()
 
 

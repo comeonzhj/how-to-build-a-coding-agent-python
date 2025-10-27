@@ -1,29 +1,66 @@
 #!/usr/bin/env python3
 """
-文件浏览助手 - 添加文件列表功能
-这是构建编程助手的第三个版本
+命令执行助手 - 添加 shell 命令执行功能
+这是构建编程助手的第四个版本
+
+这个程序在前一版本的基础上添加了 shell 命令执行功能。
+现在 Claude 不仅可以读取文件和浏览目录，还可以执行终端命令，
+真正具备了与操作系统交互的能力。
+
+新增功能：
+- 执行 shell 命令
+- 捕获命令输出（标准输出和错误输出）
+- 命令超时控制
+- 安全检查（阻止危险命令）
+- 特殊命令处理（ls、pwd、git 等）
+
+为什么要添加命令执行功能？
+- 运行开发工具（git、npm、pip 等）
+- 检查系统状态
+- 执行构建和测试命令
+- 自动化常见任务
+- 验证代码更改
+
+安全考虑：
+- 阻止危险命令（rm -rf /、sudo 等）
+- 命令超时防止挂起
+- 在当前工作目录执行（限制范围）
+- 不执行需要管理员权限的命令
+
+使用场景示例：
+- "运行 git status"
+- "查看当前目录"
+- "列出所有 Python 文件"
+- "运行测试"
+- "检查代码格式"
 """
 
-import argparse
-import json
-import os
-import sys
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from anthropic import Anthropic
-from dotenv import load_dotenv
+# 导入必要的库
+import argparse  # 命令行参数解析
+import json      # JSON 数据处理
+import os        # 操作系统功能
+import subprocess  # 子进程管理（用于执行 shell 命令）
+import sys       # 系统相关操作
+from pathlib import Path  # 现代文件路径处理
+from typing import List, Dict, Any, Optional  # 类型提示
+from anthropic import Anthropic  # Anthropic API 客户端
+from dotenv import load_dotenv   # 环境变量加载
 
 # 加载环境变量
 load_dotenv()
 
 class ToolRegistry:
-    """工具注册表"""
+    """工具注册表类
+    
+    管理所有可用工具，包括文件操作和命令执行工具。
+    """
     
     def __init__(self):
+        """初始化工具注册表"""
         self.tools = {}
     
     def register(self, name: str, description: str, input_schema: Dict, function):
-        """注册工具"""
+        """注册新工具"""
         self.tools[name] = {
             "name": name,
             "description": description,
@@ -48,7 +85,7 @@ class ToolRegistry:
 
 
 def read_file(path: str) -> Dict[str, Any]:
-    """读取文件内容"""
+    """读取文件内容（与前一版本相同）"""
     try:
         file_path = Path(path)
         
@@ -96,7 +133,7 @@ def read_file(path: str) -> Dict[str, Any]:
 
 
 def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
-    """列出文件和目录"""
+    """列出文件和目录（与前一版本相同）"""
     try:
         target_path = Path(path)
         
@@ -149,24 +186,161 @@ def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
         }
 
 
-class FileExplorerAgent:
-    """文件浏览助手"""
+def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
+    """执行 shell 命令的工具函数
+    
+    这是新增的核心工具，允许 Claude 执行终端命令。
+    
+    参数:
+        command: 要执行的 shell 命令字符串
+        timeout: 命令超时时间（秒），默认为 30 秒
+        
+    返回:
+        字典，包含以下字段：
+        - success: 命令是否成功执行（退出码为 0）
+        - stdout: 标准输出内容
+        - stderr: 错误输出内容  
+        - exit_code: 命令退出码
+        - command: 实际执行的命令
+        - error: 错误信息（如果有）
+        - 其他附加信息（取决于命令类型）
+    
+    安全特性：
+    - 危险命令检测和阻止
+    - 超时控制防止命令挂起
+    - 在当前工作目录执行（限制范围）
+    - 不执行需要特权的命令
+    
+    特殊命令增强：
+    - ls 命令：统计文件数量
+    - pwd 命令：提供当前目录信息
+    - git 分支命令：解析当前分支
+    """
+    try:
+        # 安全检查 - 阻止危险命令
+        # 这个列表包含可能有害的命令或命令片段
+        dangerous_commands = [
+            "rm -rf /",      # 删除根目录（危险！）
+            "sudo",          # 需要管理员权限
+            "mkfs",          # 格式化文件系统
+            "fdisk",         # 磁盘分区工具
+            "dd if=",        # 磁盘复制工具
+            ":(){ :|:& };:", # fork 炸弹（会耗尽系统资源）
+            "wget",          # 下载工具（可能下载恶意软件）
+            "curl"           # 网络请求工具
+        ]
+        
+        # 检查命令是否包含危险内容
+        for dangerous in dangerous_commands:
+            if dangerous in command.lower():
+                return {
+                    "success": False,
+                    "error": f"检测到潜在危险命令: {dangerous}",
+                    "stdout": "",
+                    "stderr": "命令被拒绝执行",
+                    "exit_code": 1,
+                    "command": command
+                }
+        
+        # 执行命令
+        # 使用 subprocess.run 执行 shell 命令
+        result = subprocess.run(
+            command,           # 命令字符串
+            shell=True,        # 通过 shell 执行（支持管道、重定向等）
+            capture_output=True,  # 捕获标准输出和错误输出
+            text=True,         # 以文本模式返回输出（而不是字节）
+            timeout=timeout,   # 超时时间
+            cwd=os.getcwd()    # 在当前工作目录执行
+        )
+        
+        # 构建响应
+        response = {
+            "success": result.returncode == 0,  # 退出码为 0 表示成功
+            "stdout": result.stdout,            # 标准输出
+            "stderr": result.stderr,            # 错误输出
+            "exit_code": result.returncode,     # 退出码
+            "command": command                  # 执行的命令
+        }
+        
+        # 特殊命令增强处理
+        if result.returncode == 0:
+            # 对于某些命令，添加额外的有用信息
+            
+            if command.startswith("ls"):
+                # ls 命令：统计文件数量
+                lines = result.stdout.strip().split('\n')
+                # 过滤掉空行
+                file_count = len([line for line in lines if line.strip()])
+                response["file_count"] = file_count
+                
+            elif command.startswith("pwd"):
+                # pwd 命令：显示当前工作目录
+                response["current_directory"] = result.stdout.strip()
+                
+            elif command.startswith("git") and "branch" in command:
+                # git 分支命令：解析当前分支
+                lines = result.stdout.strip().split('\n')
+                current_branch = None
+                # 查找以 * 开头的行（表示当前分支）
+                for line in lines:
+                    if line.startswith('*'):
+                        current_branch = line[1:].strip()
+                        break
+                if current_branch:
+                    response["current_branch"] = current_branch
+        
+        return response
+        
+    except subprocess.TimeoutExpired:
+        # 命令执行超时
+        return {
+            "success": False,
+            "error": f"命令执行超时（{timeout}秒）",
+            "stdout": "",
+            "stderr": "命令执行超时",
+            "exit_code": 1,
+            "command": command
+        }
+        
+    except Exception as e:
+        # 其他异常
+        return {
+            "success": False,
+            "error": f"执行命令时出错: {str(e)}",
+            "stdout": "",
+            "stderr": str(e),
+            "exit_code": 1,
+            "command": command
+        }
+
+
+class BashAgent:
+    """命令执行助手类
+    
+    现在支持三种主要工具：
+    1. read_file - 读取文件内容
+    2. list_files - 列出目录内容  
+    3. bash - 执行 shell 命令
+    
+    这个助手具备了与操作系统完整交互的能力。
+    """
     
     def __init__(self, verbose: bool = False):
-        """初始化助手"""
+        """初始化命令执行助手"""
         self.verbose = verbose
         self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.conversation = []
         self.registry = ToolRegistry()
         
-        # 注册工具
+        # 注册所有工具
         self._register_tools()
         
         if self.verbose:
-            print("[日志] 文件浏览助手已初始化")
+            print("[日志] 命令执行助手已初始化")
     
     def _register_tools(self):
-        """注册所有工具"""
+        """注册所有可用工具"""
+        
         # 注册 read_file 工具
         self.registry.register(
             name="read_file",
@@ -206,6 +380,28 @@ class FileExplorerAgent:
             function=list_files
         )
         
+        # 注册 bash 工具（新增）
+        self.registry.register(
+            name="bash",
+            description="执行 shell 命令",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的 shell 命令"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "命令超时时间（秒）",
+                        "default": 30  # 默认 30 秒超时
+                    }
+                },
+                "required": ["command"]  # command 是必需参数
+            },
+            function=bash
+        )
+        
         if self.verbose:
             print(f"[日志] 已注册 {len(self.registry.tools)} 个工具")
     
@@ -217,7 +413,7 @@ class FileExplorerAgent:
             return ""
     
     def execute_tool(self, tool_name: str, tool_input: Dict) -> Dict[str, Any]:
-        """执行工具"""
+        """执行指定的工具"""
         tool = self.registry.get(tool_name)
         if not tool:
             return {
@@ -267,7 +463,11 @@ class FileExplorerAgent:
             raise e
     
     def handle_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
-        """处理工具调用"""
+        """处理工具调用
+        
+        现在需要处理三种不同类型的工具，每种工具的结果
+        需要不同的显示方式。
+        """
         results = []
         
         for tool_call in tool_calls:
@@ -287,35 +487,59 @@ class FileExplorerAgent:
             
             results.append(tool_result)
             
-            # 显示结果摘要
+            # 显示结果摘要（根据工具类型显示不同信息）
             if result.get("success"):
-                if tool_name == "list_files":
+                if tool_name == "bash":
+                    # 显示命令执行结果
+                    stdout = result.get("stdout", "").strip()
+                    stderr = result.get("stderr", "").strip()
+                    exit_code = result.get("exit_code", 0)
+                    
+                    print(f"✅ 命令执行完成，退出码: {exit_code}")
+                    
+                    # 显示标准输出（最多 10 行）
+                    if stdout:
+                        stdout_lines = stdout.split('\n')
+                        if len(stdout_lines) <= 10:
+                            print("输出:")
+                            for line in stdout_lines:
+                                print(f"  {line}")
+                        else:
+                            # 输出太长，只显示前 10 行
+                            print("输出 (前10行):")
+                            for line in stdout_lines[:10]:
+                                print(f"  {line}")
+                            print(f"  ... 还有 {len(stdout_lines) - 10} 行")
+                    
+                    # 显示错误输出（如果有）
+                    if stderr:
+                        print(f"错误输出: {stderr[:200]}")
+                        
+                elif tool_name == "list_files":
+                    # 显示文件列表摘要
                     items = result.get("items", [])
                     print(f"✅ 找到 {len(items)} 个项目")
-                    print(f"📁 目录: {result.get('directory_count', 0)}")
-                    print(f"📄 文件: {result.get('file_count', 0)}")
-                    
-                    # 显示前几个项目
-                    if items:
-                        print("前几个项目:")
-                        for item in items[:5]:
-                            icon = "📁" if item["type"] == "directory" else "📄"
-                            print(f"  {icon} {item['name']}")
-                        if len(items) > 5:
-                            print(f"  ... 还有 {len(items) - 5} 个项目")
                     
                 elif tool_name == "read_file":
+                    # 显示文件读取摘要
                     content = result.get("content", "")
                     print(f"✅ 读取文件成功，内容长度: {len(content)} 字符")
+                    
             else:
+                # 工具执行失败
                 print(f"❌ 工具执行失败: {result.get('error', '未知错误')}")
         
         return results
     
     def run(self):
-        """运行聊天循环"""
-        print("🤖 文件浏览助手 (使用 Ctrl+C 退出)")
-        print("💡 提示：你可以说'列出文件'或'读取文件 xxx'来浏览文件系统")
+        """运行聊天循环
+        
+        主要的聊天循环，现在支持命令执行。
+        """
+        # 显示欢迎信息和使用提示
+        print("🤖 命令执行助手 (使用 Ctrl+C 退出)")
+        print("💡 提示：你可以说'运行命令 xxx'或'执行 ls'等来执行 shell 命令")
+        print("⚠️  注意：出于安全考虑，某些危险命令被禁止执行")
         print("-" * 50)
         
         if self.verbose:
@@ -326,7 +550,7 @@ class FileExplorerAgent:
                 # 获取用户输入
                 user_input = self.get_user_input()
                 
-                # 处理空输入或退出
+                # 处理退出条件
                 if not user_input or user_input.lower() in ['exit', 'quit', '退出']:
                     if self.verbose:
                         print("[日志] 用户请求退出")
@@ -355,9 +579,9 @@ class FileExplorerAgent:
                         elif content.type == "tool_use":
                             tool_calls.append(content)
                     
-                    # 如果有工具调用，执行它们
+                    # 处理工具调用（如果有）
                     if tool_calls:
-                        # 先显示文本消息（如果有）
+                        # 首先显示文本消息（如果有的话）
                         if assistant_message:
                             print(f"🤖 Claude: {assistant_message}")
                             print()
@@ -365,12 +589,13 @@ class FileExplorerAgent:
                         # 执行工具调用
                         tool_results = self.handle_tool_calls(tool_calls)
                         
-                        # 将工具结果发送回 Claude
+                        # 将 Claude 的响应添加到对话历史
                         self.conversation.append({
                             "role": "assistant",
                             "content": response.content
                         })
                         
+                        # 将工具结果发送回 Claude
                         self.conversation.append({
                             "role": "user",
                             "content": [
@@ -385,7 +610,7 @@ class FileExplorerAgent:
                         # 获取最终响应
                         final_response = self.run_inference(self.conversation)
                         
-                        # 显示最终响应
+                        # 提取并显示最终消息
                         final_message = ""
                         for content in final_response.content:
                             if content.type == "text":
@@ -427,7 +652,7 @@ class FileExplorerAgent:
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="文件浏览助手")
+    parser = argparse.ArgumentParser(description="命令执行助手")
     parser.add_argument("--verbose", "-v", action="store_true", 
                        help="启用详细日志记录")
     
@@ -440,7 +665,7 @@ def main():
         sys.exit(1)
     
     # 创建并运行助手
-    agent = FileExplorerAgent(verbose=args.verbose)
+    agent = BashAgent(verbose=args.verbose)
     agent.run()
 
 

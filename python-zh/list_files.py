@@ -1,30 +1,62 @@
 #!/usr/bin/env python3
 """
-文件编辑助手 - 添加文件编辑功能
-这是构建编程助手的第五个版本
+文件浏览助手 - 添加文件列表功能
+这是构建编程助手的第三个版本
+
+这个程序在前一版本的基础上添加了文件浏览功能。
+现在 Claude 不仅可以读取文件内容，还可以查看目录结构，
+了解文件系统的组织方式。
+
+新增功能：
+- 列出目录中的文件和子目录
+- 支持递归列出（查看子目录内容）
+- 显示文件类型、大小等信息
+- 按类型和名称排序
+
+工具系统增强：
+- 现在有多个工具：read_file 和 list_files
+- Claude 可以根据需要选择合适的工具
+- 工具之间可以协同工作（先列出文件，再读取具体内容）
+
+为什么要添加文件浏览功能？
+- 帮助用户了解目录结构
+- 找到需要的文件
+- 验证文件是否存在
+- 了解项目组织结构
+
+使用场景示例：
+- "列出当前目录的所有文件"
+- "查看项目结构"
+- "找到所有的 Python 文件"
+- "这个文件夹里有什么？"
 """
 
-import argparse
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from anthropic import Anthropic
-from dotenv import load_dotenv
+# 导入必要的库
+import argparse  # 命令行参数解析
+import json      # JSON 数据处理
+import os        # 操作系统功能
+import sys       # 系统相关操作
+from pathlib import Path  # 现代文件路径处理
+from typing import List, Dict, Any, Optional  # 类型提示
+from anthropic import Anthropic  # Anthropic API 客户端
+from dotenv import load_dotenv   # 环境变量加载
 
 # 加载环境变量
 load_dotenv()
 
 class ToolRegistry:
-    """工具注册表"""
+    """工具注册表类
+    
+    与前一版本相同，管理所有可用工具。
+    这个类提供了工具的标准化管理方式。
+    """
     
     def __init__(self):
+        """初始化工具注册表"""
         self.tools = {}
     
     def register(self, name: str, description: str, input_schema: Dict, function):
-        """注册工具"""
+        """注册新工具"""
         self.tools[name] = {
             "name": name,
             "description": description,
@@ -49,7 +81,10 @@ class ToolRegistry:
 
 
 def read_file(path: str) -> Dict[str, Any]:
-    """读取文件内容"""
+    """读取文件内容（与前一版本相同）
+    
+    这个工具保持不变，因为文件读取功能已经很好用了。
+    """
     try:
         file_path = Path(path)
         
@@ -97,8 +132,34 @@ def read_file(path: str) -> Dict[str, Any]:
 
 
 def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
-    """列出文件和目录"""
+    """列出文件和目录的工具函数
+    
+    这是新添加的工具，用于浏览文件系统。
+    它可以列出指定目录中的所有文件和子目录。
+    
+    参数:
+        path: 要列出的目录路径，默认为当前目录 "."
+        recursive: 是否递归列出子目录内容，默认为 False
+        
+    返回:
+        字典，包含以下字段：
+        - success: 是否成功
+        - items: 文件和目录列表（每个元素包含名称、类型、大小等信息）
+        - path: 目录的绝对路径
+        - total_count: 总项目数
+        - directory_count: 子目录数量
+        - file_count: 文件数量
+        - error: 错误信息（如果失败）
+    
+    功能特点：
+    - 支持绝对路径和相对路径
+    - 自动排序（目录在前，文件在后；按名称排序）
+    - 显示文件大小（字节）
+    - 提供绝对路径信息
+    - 递归和非递归两种模式
+    """
     try:
+        # 解析路径（支持相对路径和绝对路径）
         target_path = Path(path)
         
         # 检查路径是否存在
@@ -112,246 +173,84 @@ def list_files(path: str = ".", recursive: bool = False) -> Dict[str, Any]:
         items = []
         
         if recursive:
-            # 递归列出所有文件和目录
+            # 递归模式：列出所有子目录的内容
+            # rglob("*") 会递归地匹配所有文件和目录
             for item in target_path.rglob("*"):
+                # 计算相对路径（相对于目标目录）
                 relative_path = str(item.relative_to(target_path))
+                
+                # 收集项目信息
                 items.append({
-                    "name": relative_path,
-                    "type": "directory" if item.is_dir() else "file",
-                    "size": item.stat().st_size if item.is_file() else 0,
-                    "absolute_path": str(item.absolute())
+                    "name": relative_path,  # 相对路径名称
+                    "type": "directory" if item.is_dir() else "file",  # 类型
+                    "size": item.stat().st_size if item.is_file() else 0,  # 文件大小
+                    "absolute_path": str(item.absolute())  # 绝对路径
                 })
         else:
-            # 只列出当前目录
+            # 非递归模式：只列出当前目录
+            # iterdir() 只列出直接子项
             for item in target_path.iterdir():
                 items.append({
-                    "name": item.name,
-                    "type": "directory" if item.is_dir() else "file",
-                    "size": item.stat().st_size if item.is_file() else 0,
-                    "absolute_path": str(item.absolute())
+                    "name": item.name,  # 名称（不包含路径）
+                    "type": "directory" if item.is_dir() else "file",  # 类型
+                    "size": item.stat().st_size if item.is_file() else 0,  # 大小
+                    "absolute_path": str(item.absolute())  # 绝对路径
                 })
         
         # 按类型和名称排序
+        # 这样目录会排在文件前面，同类项目按名称排序
         items.sort(key=lambda x: (x["type"], x["name"]))
         
+        # 计算统计信息
+        directory_count = sum(1 for item in items if item["type"] == "directory")
+        file_count = sum(1 for item in items if item["type"] == "file")
+        
+        # 返回完整结果
         return {
             "success": True,
-            "items": items,
-            "path": str(target_path.absolute()),
-            "total_count": len(items),
-            "directory_count": sum(1 for item in items if item["type"] == "directory"),
-            "file_count": sum(1 for item in items if item["type"] == "file")
+            "items": items,  # 项目列表
+            "path": str(target_path.absolute()),  # 目录绝对路径
+            "total_count": len(items),  # 总数量
+            "directory_count": directory_count,  # 目录数量
+            "file_count": file_count  # 文件数量
         }
         
     except Exception as e:
+        # 错误处理
         return {
             "success": False,
             "error": f"列出文件时出错: {str(e)}"
         }
 
 
-def bash(command: str, timeout: int = 30) -> Dict[str, Any]:
-    """执行 shell 命令"""
-    try:
-        # 安全检查 - 禁止某些危险命令
-        dangerous_commands = [
-            "rm -rf /", "sudo", "mkfs", "fdisk", "dd if=", 
-            ":(){ :|:& };:", "wget", "curl"
-        ]
-        
-        for dangerous in dangerous_commands:
-            if dangerous in command.lower():
-                return {
-                    "success": False,
-                    "error": f"检测到潜在危险命令: {dangerous}",
-                    "stdout": "",
-                    "stderr": "命令被拒绝执行",
-                    "exit_code": 1
-                }
-        
-        # 执行命令
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=os.getcwd()
-        )
-        
-        # 构建响应
-        response = {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-            "command": command
-        }
-        
-        return response
-        
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": f"命令执行超时（{timeout}秒）",
-            "stdout": "",
-            "stderr": "命令执行超时",
-            "exit_code": 1
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"执行命令时出错: {str(e)}",
-            "stdout": "",
-            "stderr": str(e),
-            "exit_code": 1
-        }
-
-
-def edit_file(path: str, content: str, create_if_not_exists: bool = True) -> Dict[str, Any]:
-    """编辑或创建文件"""
-    try:
-        file_path = Path(path)
-        
-        # 检查文件是否存在
-        if not file_path.exists():
-            if not create_if_not_exists:
-                return {
-                    "success": False,
-                    "error": f"文件不存在且不允许创建: {path}"
-                }
-            
-            # 创建文件（包括必要的目录）
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            if self.verbose:
-                print(f"[日志] 创建新文件: {path}")
-        
-        # 检查是否是文件（不是目录）
-        if file_path.exists() and not file_path.is_file():
-            return {
-                "success": False,
-                "error": f"路径不是文件: {path}"
-            }
-        
-        # 写入文件内容
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # 获取文件统计信息
-            file_stats = file_path.stat()
-            
-            return {
-                "success": True,
-                "path": str(file_path.absolute()),
-                "size": file_stats.st_size,
-                "created": not file_path.exists() if create_if_not_exists else False,
-                "message": "文件已成功保存"
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"写入文件时出错: {str(e)}"
-            }
-            
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"编辑文件时出错: {str(e)}"
-        }
-
-
-def str_replace_file(path: str, old: str, new: str, replace_all: bool = False) -> Dict[str, Any]:
-    """在文件中替换字符串"""
-    try:
-        file_path = Path(path)
-        
-        # 检查文件是否存在
-        if not file_path.exists():
-            return {
-                "success": False,
-                "error": f"文件不存在: {path}"
-            }
-        
-        # 检查是否是文件（不是目录）
-        if not file_path.is_file():
-            return {
-                "success": False,
-                "error": f"路径不是文件: {path}"
-            }
-        
-        # 读取文件内容
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            # 如果 UTF-8 失败，尝试其他编码
-            with open(file_path, 'r', encoding='latin-1') as f:
-                content = f.read()
-        
-        # 执行替换
-        if replace_all:
-            new_content = content.replace(old, new)
-            replacements = content.count(old)
-        else:
-            new_content = content.replace(old, new, 1)
-            replacements = 1 if old in content else 0
-        
-        if replacements == 0:
-            return {
-                "success": False,
-                "error": f"未找到要替换的字符串: '{old}'",
-                "replacements": 0
-            }
-        
-        # 写回文件
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            
-            return {
-                "success": True,
-                "path": str(file_path.absolute()),
-                "replacements": replacements,
-                "old_length": len(old),
-                "new_length": len(new),
-                "message": f"成功替换 {replacements} 处"
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"写入文件时出错: {str(e)}"
-            }
-            
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"替换字符串时出错: {str(e)}"
-        }
-
-
-class EditToolAgent:
-    """文件编辑助手"""
+class FileExplorerAgent:
+    """文件浏览助手类
+    
+    这是主要的助手类，现在支持两种工具：
+    1. read_file - 读取文件内容
+    2. list_files - 列出目录内容
+    
+    Claude 可以根据用户的问题选择合适的工具，
+    或者组合使用多个工具来完成复杂任务。
+    """
     
     def __init__(self, verbose: bool = False):
-        """初始化助手"""
+        """初始化文件浏览助手"""
         self.verbose = verbose
         self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.conversation = []
         self.registry = ToolRegistry()
         
-        # 注册工具
+        # 注册所有工具
         self._register_tools()
         
         if self.verbose:
-            print("[日志] 文件编辑助手已初始化")
+            print("[日志] 文件浏览助手已初始化")
     
     def _register_tools(self):
-        """注册所有工具"""
-        # 注册 read_file 工具
+        """注册所有可用工具"""
+        
+        # 注册 read_file 工具（已存在）
         self.registry.register(
             name="read_file",
             description="读取文件内容",
@@ -368,7 +267,7 @@ class EditToolAgent:
             function=read_file
         )
         
-        # 注册 list_files 工具
+        # 注册 list_files 工具（新增）
         self.registry.register(
             name="list_files",
             description="列出目录中的文件和子目录",
@@ -378,94 +277,16 @@ class EditToolAgent:
                     "path": {
                         "type": "string",
                         "description": "要列出的目录路径（默认为当前目录）",
-                        "default": "."
+                        "default": "."  # 默认值是当前目录
                     },
                     "recursive": {
                         "type": "boolean",
                         "description": "是否递归列出子目录内容",
-                        "default": False
+                        "default": False  # 默认不递归
                     }
                 }
             },
             function=list_files
-        )
-        
-        # 注册 bash 工具
-        self.registry.register(
-            name="bash",
-            description="执行 shell 命令",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "要执行的 shell 命令"
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "命令超时时间（秒）",
-                        "default": 30
-                    }
-                },
-                "required": ["command"]
-            },
-            function=bash
-        )
-        
-        # 注册 edit_file 工具
-        self.registry.register(
-            name="edit_file",
-            description="编辑或创建文件",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "要编辑的文件路径"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "新的文件内容"
-                    },
-                    "create_if_not_exists": {
-                        "type": "boolean",
-                        "description": "如果文件不存在是否创建",
-                        "default": True
-                    }
-                },
-                "required": ["path", "content"]
-            },
-            function=edit_file
-        )
-        
-        # 注册 str_replace_file 工具
-        self.registry.register(
-            name="str_replace_file",
-            description="在文件中替换字符串",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "要编辑的文件路径"
-                    },
-                    "old": {
-                        "type": "string",
-                        "description": "要替换的字符串"
-                    },
-                    "new": {
-                        "type": "string",
-                        "description": "新字符串"
-                    },
-                    "replace_all": {
-                        "type": "boolean",
-                        "description": "是否替换所有匹配项",
-                        "default": False
-                    }
-                },
-                "required": ["path", "old", "new"]
-            },
-            function=str_replace_file
         )
         
         if self.verbose:
@@ -479,7 +300,7 @@ class EditToolAgent:
             return ""
     
     def execute_tool(self, tool_name: str, tool_input: Dict) -> Dict[str, Any]:
-        """执行工具"""
+        """执行指定的工具"""
         tool = self.registry.get(tool_name)
         if not tool:
             return {
@@ -529,7 +350,14 @@ class EditToolAgent:
             raise e
     
     def handle_tool_calls(self, tool_calls) -> List[Dict[str, Any]]:
-        """处理工具调用"""
+        """处理工具调用
+        
+        这个方法现在需要处理两种不同类型的工具：
+        1. list_files - 列出文件和目录
+        2. read_file - 读取文件内容
+        
+        根据工具类型，显示不同的结果摘要。
+        """
         results = []
         
         for tool_call in tool_calls:
@@ -549,52 +377,46 @@ class EditToolAgent:
             
             results.append(tool_result)
             
-            # 显示结果摘要
+            # 显示结果摘要（根据工具类型显示不同信息）
             if result.get("success"):
-                if tool_name == "edit_file":
-                    path = result.get("path", "")
-                    size = result.get("size", 0)
-                    created = result.get("created", False)
-                    message = result.get("message", "")
-                    
-                    print(f"✅ 文件编辑成功")
-                    print(f"📁 文件路径: {path}")
-                    print(f"📊 文件大小: {size} 字节")
-                    if created:
-                        print("🆕 创建了新文件")
-                    print(f"💬 {message}")
-                    
-                elif tool_name == "str_replace_file":
-                    path = result.get("path", "")
-                    replacements = result.get("replacements", 0)
-                    message = result.get("message", "")
-                    
-                    print(f"✅ 字符串替换成功")
-                    print(f"📁 文件路径: {path}")
-                    print(f"🔢 替换次数: {replacements}")
-                    print(f"💬 {message}")
-                    
-                elif tool_name == "bash":
-                    exit_code = result.get("exit_code", 0)
-                    print(f"✅ 命令执行完成，退出码: {exit_code}")
-                    
-                elif tool_name == "list_files":
+                if tool_name == "list_files":
+                    # 显示文件列表的摘要信息
                     items = result.get("items", [])
                     print(f"✅ 找到 {len(items)} 个项目")
+                    print(f"📁 目录: {result.get('directory_count', 0)}")
+                    print(f"📄 文件: {result.get('file_count', 0)}")
+                    
+                    # 显示前几个项目作为预览
+                    if items:
+                        print("前几个项目:")
+                        for item in items[:5]:
+                            # 根据类型选择图标
+                            icon = "📁" if item["type"] == "directory" else "📄"
+                            print(f"  {icon} {item['name']}")
+                        
+                        # 如果还有更多项目，显示省略信息
+                        if len(items) > 5:
+                            print(f"  ... 还有 {len(items) - 5} 个项目")
                     
                 elif tool_name == "read_file":
+                    # 显示文件读取的摘要信息
                     content = result.get("content", "")
                     print(f"✅ 读取文件成功，内容长度: {len(content)} 字符")
                     
             else:
+                # 工具执行失败
                 print(f"❌ 工具执行失败: {result.get('error', '未知错误')}")
         
         return results
     
     def run(self):
-        """运行聊天循环"""
-        print("🤖 文件编辑助手 (使用 Ctrl+C 退出)")
-        print("💡 提示：你可以说'创建文件 xxx'、'编辑文件 xxx'或'替换文件中的 xxx'")
+        """运行聊天循环
+        
+        主要的聊天循环，支持多工具调用。
+        """
+        # 显示欢迎信息和提示
+        print("🤖 文件浏览助手 (使用 Ctrl+C 退出)")
+        print("💡 提示：你可以说'列出文件'或'读取文件 xxx'来浏览文件系统")
         print("-" * 50)
         
         if self.verbose:
@@ -605,7 +427,7 @@ class EditToolAgent:
                 # 获取用户输入
                 user_input = self.get_user_input()
                 
-                # 处理空输入或退出
+                # 处理退出条件
                 if not user_input or user_input.lower() in ['exit', 'quit', '退出']:
                     if self.verbose:
                         print("[日志] 用户请求退出")
@@ -634,9 +456,9 @@ class EditToolAgent:
                         elif content.type == "tool_use":
                             tool_calls.append(content)
                     
-                    # 如果有工具调用，执行它们
+                    # 处理工具调用（如果有）
                     if tool_calls:
-                        # 先显示文本消息（如果有）
+                        # 首先显示文本消息（如果有的话）
                         if assistant_message:
                             print(f"🤖 Claude: {assistant_message}")
                             print()
@@ -644,12 +466,13 @@ class EditToolAgent:
                         # 执行工具调用
                         tool_results = self.handle_tool_calls(tool_calls)
                         
-                        # 将工具结果发送回 Claude
+                        # 将 Claude 的响应添加到对话历史
                         self.conversation.append({
                             "role": "assistant",
                             "content": response.content
                         })
                         
+                        # 将工具结果发送回 Claude
                         self.conversation.append({
                             "role": "user",
                             "content": [
@@ -664,7 +487,7 @@ class EditToolAgent:
                         # 获取最终响应
                         final_response = self.run_inference(self.conversation)
                         
-                        # 显示最终响应
+                        # 提取并显示最终消息
                         final_message = ""
                         for content in final_response.content:
                             if content.type == "text":
@@ -706,7 +529,7 @@ class EditToolAgent:
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="文件编辑助手")
+    parser = argparse.ArgumentParser(description="文件浏览助手")
     parser.add_argument("--verbose", "-v", action="store_true", 
                        help="启用详细日志记录")
     
@@ -719,7 +542,7 @@ def main():
         sys.exit(1)
     
     # 创建并运行助手
-    agent = EditToolAgent(verbose=args.verbose)
+    agent = FileExplorerAgent(verbose=args.verbose)
     agent.run()
 
 

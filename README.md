@@ -1,5 +1,7 @@
 # 🧠 Build Your Own Coding Agent via a Step-by-Step Workshop
 
+[中文 Python 版](/python-zh)
+
 Welcome! 👋 This workshop will guide you through building your own **AI-powered coding assistant** — starting from a basic chatbot, and adding powerful tools like file reading, shell command execution, and code searching.
 
 You don’t need to be an AI expert. Just follow along and build step-by-step!
@@ -22,7 +24,7 @@ By the end of this workshop, you’ll understand how to:
 
 ## 🛠️ What We're Building
 
-You’ll build 6 versions of a coding assistant. 
+You’ll build 6 versions of a coding assistant.
 
 Each version adds more features:
 
@@ -42,7 +44,7 @@ graph LR
         D --> E[edit_tool.go<br/>+ File Editing]
         E --> F[code_search_tool.go<br/>+ Code Search]
     end
-    
+
     subgraph "Tool Capabilities"
         G[No Tools] --> H[read_file]
         H --> I[read_file<br/>list_files]
@@ -50,7 +52,7 @@ graph LR
         J --> K[read_file<br/>list_files<br/>bash<br/>edit_file]
         K --> L[read_file<br/>list_files<br/>bash<br/>code_search]
     end
-    
+
     A -.-> G
     B -.-> H
     C -.-> I
@@ -86,7 +88,7 @@ graph TB
         A --> D[getUserMessage Function]
         A --> E[Verbose Logging]
     end
-    
+
     subgraph "Shared Event Loop"
         F[Start Chat Session] --> G[Get User Input]
         G --> H{Empty Input?}
@@ -102,7 +104,7 @@ graph TB
         P --> J
         M --> G
     end
-    
+
     subgraph "Tool Execution Loop"
         N --> Q[Find Tool by Name]
         Q --> R[Execute Tool Function]
